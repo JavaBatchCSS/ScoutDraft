@@ -12,6 +12,8 @@
 #[cfg(target_arch = "wasm32")]
 pub mod download;
 #[cfg(target_arch = "wasm32")]
+mod github;
+#[cfg(target_arch = "wasm32")]
 mod host;
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -44,6 +46,9 @@ mod web {
         /// document title when it changed (so the tab and an embedding page name the open
         /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            for (name, bytes) in crate::github::drain() {
+                self.0.open_bytes(&name, &bytes);
+            }
             // Background reads are consume-based and run on hidden ticks too. Dropped files are
             // input and are read from `ui` only.
             self.1.drain(&mut self.0);
@@ -113,6 +118,7 @@ mod web {
     }
 
     pub fn start() {
+        crate::github::install();
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
             read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
@@ -136,7 +142,10 @@ mod web {
                 bridge.install();
                 cadcraft_engine::cmd::file::set_deliver(crate::host::deliver);
             }
-            None => cadcraft_engine::cmd::file::set_deliver(crate::download::download),
+            None => cadcraft_engine::cmd::file::set_deliver(|name, mime, bytes| {
+                crate::github::offer(name, mime, bytes);
+                crate::download::download(name, mime, bytes)
+            }),
         }
         let app_bridge = bridge.clone();
         wasm_bindgen_futures::spawn_local(async move {
