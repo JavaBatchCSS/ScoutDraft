@@ -30,13 +30,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "$UPSTREAM_REPOSITORY"
           git fetch upstream main
-          branch="sync/cadcraft-$(date -u +%Y%m%d)"
+          branch="sync/cadcraft-${{ github.run_id }}"
           git switch -c "$branch"
           cp .github/workflows/pages.yml /tmp/pages.yml
           git merge --allow-unrelated-histories -X theirs upstream/main -m "Sync CadCraft upstream"
           cp /tmp/pages.yml .github/workflows/pages.yml
           perl -0pi -e 's/CADCraft/ScoutDraft/g; s/<html lang="en">/<html lang="fr">/g' apps/cadcraft-web/index.html apps/cadcraft-web/src/main.rs
           perl -0pi -e 's/let mut app = CadApp::new\(session, services\(\)\);/let mut app = CadApp::new(session, services());\n                        app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::French;/g' apps/cadcraft-web/src/main.rs
+          grep -q 'Preference::French' apps/cadcraft-web/src/main.rs
           git add -A
           git diff --cached --quiet && exit 0
           git commit -m "Sync CadCraft upstream updates"
