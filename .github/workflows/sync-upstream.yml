@@ -1,0 +1,47 @@
+name: Synchronize ScoutDraft with CadCraft upstream
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge upstream and open update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPOSITORY: https://github.com/storytold/cadcraft.git
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPOSITORY"
+          git fetch upstream main
+          branch="sync/cadcraft-${{ github.run_id }}"
+          git switch -c "$branch"
+          cp .github/workflows/pages.yml /tmp/pages.yml
+          git merge --allow-unrelated-histories -X theirs upstream/main -m "Sync CadCraft upstream"
+          cp /tmp/pages.yml .github/workflows/pages.yml
+          perl -0pi -e 's/CADCraft/ScoutDraft/g; s/<html lang="en">/<html lang="fr">/g' apps/cadcraft-web/index.html apps/cadcraft-web/src/main.rs
+          perl -0pi -e 's/let mut app = CadApp::new\(session, services\(\)\);/let mut app = CadApp::new(session, services());\n                        app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::French;/g' apps/cadcraft-web/src/main.rs
+          grep -q 'Preference::French' apps/cadcraft-web/src/main.rs
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Sync CadCraft upstream updates"
+          git push --set-upstream origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Weekly CadCraft upstream sync" \
+            --body "Automated weekly synchronization from storytold/cadcraft. Review the upstream changes before merging."

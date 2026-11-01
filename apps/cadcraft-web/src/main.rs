@@ -1,4 +1,4 @@
-//! CADCraft in the browser.
+//! ScoutDraft in the browser.
 //!
 //! Runs the same [`cadcraft_ui_egui::CadApp`] as the desktop app through eframe's web runner
 //! (wgpu: WebGPU where available, WebGL2 otherwise). Build with `trunk build --release` from this
@@ -11,6 +11,8 @@
 
 #[cfg(target_arch = "wasm32")]
 pub mod download;
+#[cfg(target_arch = "wasm32")]
+mod github;
 #[cfg(target_arch = "wasm32")]
 mod host;
 
@@ -44,6 +46,9 @@ mod web {
         /// document title when it changed (so the tab and an embedding page name the open
         /// drawing), and reports unsaved changes to that page.
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            for (name, bytes) in crate::github::drain() {
+                self.0.open_bytes(&name, &bytes);
+            }
             // Background reads are consume-based and run on hidden ticks too. Dropped files are
             // input and are read from `ui` only.
             self.1.drain(&mut self.0);
@@ -113,6 +118,7 @@ mod web {
     }
 
     pub fn start() {
+        crate::github::install();
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
             read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
@@ -136,7 +142,10 @@ mod web {
                 bridge.install();
                 cadcraft_engine::cmd::file::set_deliver(crate::host::deliver);
             }
-            None => cadcraft_engine::cmd::file::set_deliver(crate::download::download),
+            None => cadcraft_engine::cmd::file::set_deliver(|name, mime, bytes| {
+                crate::github::offer(name, mime, bytes);
+                crate::download::download(name, mime, bytes)
+            }),
         }
         let app_bridge = bridge.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -159,6 +168,7 @@ mod web {
                         // Embedded, the parent sends the drawing: start on the Start tab, not Drawing1.
                         let session = if app_bridge.is_some() { Session::empty() } else { Session::new() };
                         let mut app = CadApp::new(session, services());
+                        app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::French;
                         app.system_languages =
                             web_sys::window().map(|w| w.navigator().languages().iter().filter_map(|v| v.as_string()).collect()).unwrap_or_default();
                         if let Some(profile) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::options::PROFILE_KEY)) {
@@ -223,13 +233,13 @@ fn wants_cpu(query: &str) -> bool {
 }
 
 /// The browser tab title: the open drawing's file name, a bullet once it has unsaved changes,
-/// and the app name (`drawing.dwg • — CADCraft`), or just the app name with no drawing. An
+/// and the app name (`drawing.dwg • — ScoutDraft`), or just the app name with no drawing. An
 /// embedding page (`?host=parent`) reads it to tell which drawing opened and whether it is dirty.
 #[cfg(any(target_arch = "wasm32", test))]
 fn document_title(name: Option<&str>, dirty: bool) -> String {
     match name.filter(|n| !n.trim().is_empty()) {
-        Some(name) => format!("{name}{} — CADCraft", if dirty { " •" } else { "" }),
-        None => "CADCraft".to_string(),
+        Some(name) => format!("{name}{} — ScoutDraft", if dirty { " •" } else { "" }),
+        None => "ScoutDraft".to_string(),
     }
 }
 
@@ -294,9 +304,9 @@ mod tests {
     /// bullet; a blank or missing name leaves the app name alone and never shows a bullet.
     #[test]
     fn viewport_title_names_the_document_and_marks_unsaved_changes() {
-        assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — CADCraft");
-        assert_eq!(document_title(Some("drawing.dwg"), true), "drawing.dwg • — CADCraft");
-        assert_eq!(document_title(Some("Drawing1"), false), "Drawing1 — CADCraft");
+        assert_eq!(document_title(Some("drawing.dwg"), false), "drawing.dwg — ScoutDraft");
+        assert_eq!(document_title(Some("drawing.dwg"), true), "drawing.dwg • — ScoutDraft");
+        assert_eq!(document_title(Some("Drawing1"), false), "Drawing1 — ScoutDraft");
         assert_eq!(document_title(None, false), "CADCraft");
         assert_eq!(document_title(None, true), "CADCraft");
         assert_eq!(document_title(Some("   "), true), "CADCraft");
@@ -307,15 +317,15 @@ mod tests {
     #[test]
     fn viewport_title_follows_open_rename_and_dirty_changes_only() {
         let mut sent = None;
-        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false).as_deref(), Some("drawing.dwg — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false).as_deref(), Some("drawing.dwg — ScoutDraft"));
         // The page already has it: send nothing.
         assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), false), None);
         // Unsaved changes add the bullet.
-        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), true).as_deref(), Some("drawing.dwg • — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("drawing.dwg"), true).as_deref(), Some("drawing.dwg • — ScoutDraft"));
         // A rename shows the new name.
-        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), true).as_deref(), Some("plan.dwg • — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), true).as_deref(), Some("plan.dwg • — ScoutDraft"));
         // Saving clears it again.
-        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), false).as_deref(), Some("plan.dwg — CADCraft"));
+        assert_eq!(title_to_send(&mut sent, Some("plan.dwg"), false).as_deref(), Some("plan.dwg — ScoutDraft"));
         // Closing the last drawing leaves the app name only.
         assert_eq!(title_to_send(&mut sent, None, false).as_deref(), Some("CADCraft"));
         assert_eq!(title_to_send(&mut sent, None, false), None);
@@ -335,6 +345,6 @@ mod tests {
         assert!(push_title(&mut sent, Some("drawing.dwg"), true, |title| written.push(title.to_owned())));
         // Closing the drawing writes the app name.
         assert!(push_title(&mut sent, None, false, |title| written.push(title.to_owned())));
-        assert_eq!(written, ["drawing.dwg — CADCraft", "drawing.dwg • — CADCraft", "CADCraft"]);
+        assert_eq!(written, ["drawing.dwg — ScoutDraft", "drawing.dwg • — ScoutDraft", "ScoutDraft"]);
     }
 }

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CADCraft</title>
+  <title>ScoutDraft</title>
   <link data-trunk rel="rust" data-bin="cadcraft-web" data-wasm-opt="z" data-weak-refs />
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #22282f; }
@@ -14,6 +14,43 @@
 </head>
 <body>
   <canvas id="cadcraft_canvas"></canvas>
-  <div id="cadcraft_loading">Loading CADCraft&hellip;</div>
+  <div id="cadcraft_loading">Chargement de ScoutDraft&hellip;</div>
+  <button id="scout-github-toggle" type="button">Enregistrer dans mon espace</button>
+  <aside id="scout-github-panel" hidden>
+    <h2>Mon espace ScoutHub</h2>
+    <p class="scout-help">Les fichiers sont enregistrés dans le dépôt central ScoutHub. Votre jeton reste dans ce navigateur et n’est jamais envoyé ailleurs.</p>
+    <label>Jeton GitHub <input id="scout-gh-token" type="password" autocomplete="off" placeholder="ghp_…"></label>
+    <div class="scout-row"><label>Propriétaire <input id="scout-gh-owner" value="JavaBatchCSS"></label><label>Dépôt <input id="scout-gh-repo" value="ScoutHub"></label></div>
+    <label>Adresse e-mail <input id="scout-gh-email" type="email" placeholder="vous@example.com"></label>
+    <label>Nom du fichier <input id="scout-gh-name" placeholder="projet-scoutdraft.dxf"></label>
+    <div class="scout-actions"><button id="scout-gh-save" type="button">Enregistrer le dernier export</button><button id="scout-gh-refresh" type="button">Actualiser</button></div>
+    <div id="scout-gh-status" role="status"></div><ul id="scout-gh-files"></ul>
+  </aside>
+  <style>
+    #scout-github-toggle{position:fixed;right:16px;top:16px;z-index:20;border:0;border-radius:8px;padding:9px 12px;background:#2563eb;color:#fff;cursor:pointer}
+    #scout-github-panel{position:fixed;right:16px;top:58px;z-index:21;width:min(360px,calc(100vw - 32px));max-height:calc(100vh - 74px);overflow:auto;padding:16px;border-radius:12px;background:#182230;color:#f8fafc;box-shadow:0 12px 40px #0008;font:14px system-ui,sans-serif}
+    #scout-github-panel[hidden]{display:none}#scout-github-panel h2{margin:0 0 8px;font-size:18px}#scout-github-panel label{display:block;margin:9px 0}
+    #scout-github-panel input{box-sizing:border-box;width:100%;margin-top:4px;padding:7px;border:1px solid #526274;border-radius:6px;background:#0f1720;color:inherit}
+    .scout-row{display:flex;gap:8px}.scout-row label{flex:1}.scout-actions{display:flex;gap:8px;margin-top:12px}.scout-actions button,#scout-gh-files button{padding:7px;border:0;border-radius:6px;cursor:pointer}
+    #scout-gh-save{background:#22c55e;color:#052e16}.scout-actions button+button{background:#64748b;color:#fff}.scout-help{color:#cbd5e1;font-size:12px;line-height:1.35}
+    #scout-gh-status{min-height:20px;margin-top:10px;color:#93c5fd}#scout-gh-files{padding-left:20px}#scout-gh-files li{margin:6px 0}#scout-gh-files button{background:#334155;color:#fff}
+  </style>
+  <script>
+  (()=>{const $=id=>document.getElementById(id),api=()=>{const t=$("scout-gh-token").value.trim();if(!t)throw Error("Saisissez un jeton GitHub.");return {h:{Authorization:"Bearer "+t,Accept:"application/vnd.github+json","Content-Type":"application/json"}}},st=m=>$("scout-gh-status").textContent=m;
+  let last=null; const b64=bytes=>{let s="";for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.slice(i,i+0x8000));return btoa(s)},unb64=s=>{const raw=atob(s.replace(/\n/g,"")),a=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)a[i]=raw.charCodeAt(i);return a};
+  const cfg=()=>{const owner=$("scout-gh-owner").value.trim(),repo=$("scout-gh-repo").value.trim(),email=$("scout-gh-email").value.trim();if(!owner||!repo||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))throw Error("Indiquez le propriétaire, le dépôt et une adresse e-mail valide.");return {owner,repo,email}};
+  const root=()=>{const c=cfg();return `files/${encodeURIComponent(c.email).replace(/%40/g,"@")}`},url=(c,p)=>`https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${p.split("/").map(encodeURIComponent).join("/")}`;
+  async function req(u,o={}){const r=await fetch(u,o);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.message||`GitHub (${r.status})`);return d}
+  async function refresh(){try{const c=cfg(),d=await req(url(c,root()),{headers:api().h});const list=$("scout-gh-files");list.textContent="";(Array.isArray(d)?d:[]).filter(x=>x.type==="file").forEach(x=>{const li=document.createElement("li"),bt=document.createElement("button");bt.textContent="Ouvrir "+x.name;bt.onclick=()=>openFile(x.path,x.name);li.append(bt);list.append(li)});st(`${list.children.length} fichier(s) trouvé(s).`)}catch(e){if(e.message.includes("404")){$("scout-gh-files").textContent="Aucun fichier pour cette adresse.";st("Dossier vide.");}else st("Erreur : "+e.message)}}
+  async function openFile(path,name){try{const c=cfg(),d=await req(url(c,path),{headers:api().h}),bytes=unb64(d.content);window.dispatchEvent(new CustomEvent("scout-github-open",{detail:{name,bytes}}));st("Fichier ouvert dans ScoutDraft.");}catch(e){st("Erreur : "+e.message)}}
+  async function save(){try{if(!last)throw Error("Effectuez d’abord un export dans ScoutDraft.");const c=cfg(),name=($("scout-gh-name").value.trim()||last.name).replace(/\\/g,"/").split("/").pop();if(!name||name==="."||name==="..")throw Error("Nom de fichier invalide.");const path=root()+"/"+name,headers=api().h;let sha;try{sha=(await req(url(c,path),{headers})).sha}catch(e){if(!e.message.includes("404"))throw e}const body={message:`ScoutDraft : ${name}`,content:b64(last.bytes),branch:(await req(`https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`,{headers})).default_branch,...(sha?{sha}:{})};await req(url(c,path),{method:"PUT",headers,body:JSON.stringify(body)});st("Fichier enregistré dans ScoutHub.");await refresh()}catch(e){st("Erreur : "+e.message)}}
+  const rememberedEmail=new URLSearchParams(location.search).get("email")||localStorage.getItem("scouthub.email");if(rememberedEmail){$("scout-gh-email").value=rememberedEmail}
+  $("scout-gh-token").value=localStorage.getItem("scouthub.github-token")||"";
+  $("scout-gh-token").addEventListener("change",()=>localStorage.setItem("scouthub.github-token",$("scout-gh-token").value));
+  $("scout-gh-email").addEventListener("change",()=>localStorage.setItem("scouthub.email",$("scout-gh-email").value.trim().toLowerCase()));
+  $("scout-github-toggle").onclick=()=>{$("scout-github-panel").hidden=!$("scout-github-panel").hidden;if(!$("scout-github-panel").hidden&&$("scout-gh-email").value)refresh()};$("scout-gh-save").onclick=save;$("scout-gh-refresh").onclick=refresh;
+  window.addEventListener("scout-github-save",e=>{last=e.detail;$("scout-gh-name").value=last.name||"";st("Export prêt à être enregistré dans GitHub.")});
+  })();
+  </script>
 </body>
 </html>
